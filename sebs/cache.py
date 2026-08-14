@@ -240,7 +240,7 @@ class Cache(LoggingBase):
         the cache directory and loads them into memory.
         """
         with self._lock:
-            for cloud in ["azure", "aws", "gcp", "openwhisk", "local"]:
+            for cloud in ["azure", "aws", "gcp", "openwhisk", "local", "openfaas", "momos", "knative"]:
                 cloud_config_file = os.path.join(self.cache_dir, "{}.json".format(cloud))
                 if os.path.exists(cloud_config_file):
                     with open(cloud_config_file, "r") as f:
@@ -288,7 +288,7 @@ class Cache(LoggingBase):
         """
         if self.config_updated:
             with self._lock:
-                for cloud in ["azure", "aws", "gcp", "openwhisk", "local"]:
+                for cloud in ["azure", "aws", "gcp", "openwhisk", "local", "openfaas", "momos", "knative"]:
                     if cloud in self.cached_config:
                         cloud_config_file = os.path.join(self.cache_dir, "{}.json".format(cloud))
                         self.logging.info("Update cached config {}".format(cloud_config_file))
@@ -298,7 +298,7 @@ class Cache(LoggingBase):
         """Access cached configuration of a benchmark.
 
         Args:
-            deployment (str): Deployment platform ('aws', 'azure', 'gcp', 'openwhisk', 'local').
+            deployment (str): Deployment platform ('aws', 'azure', 'gcp', 'openwhisk', 'local', 'openfaas', 'momos', 'knative').
             benchmark (str): Benchmark name (e.g., '110.dynamic-html').
 
         Returns:

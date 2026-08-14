@@ -1,0 +1,11 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG VERSION
+ENV NODE_VERSION=${VERSION}
+
+WORKDIR /function
+COPY . /function
+
+RUN if [ -f package.json ]; then npm install --production; fi
+
+CMD ["node", "index.js"]

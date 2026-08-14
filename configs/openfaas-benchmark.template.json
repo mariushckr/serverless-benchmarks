@@ -1,0 +1,53 @@
+{
+  "experiments": {
+    "deployment": "openfaas",
+    "update_code": false,
+    "update_storage": false,
+    "download_results": false,
+    "architecture": "x64",
+    "system_variant": "container",
+    "runtime": {
+      "language": "python",
+      "version": "3.11"
+    },
+    "type": "perf-cost",
+    "perf-cost": {
+      "benchmark": "010.sleep",
+      "experiments": ["warm"],
+      "input-size": "test",
+      "repetitions": 5,
+      "concurrent-invocations": 1,
+      "memory-sizes": []
+    }
+  },
+  "deployment": {
+    "name": "openfaas",
+    "openfaas": {
+      "gatewayUrl": "http://192.168.57.10:8080",
+      "clusterGateways": [
+        "http://192.168.57.21:31112",
+        "http://192.168.57.31:31112"
+      ],
+      "docker_registry": {
+        "registry": "",
+        "username": "${DOCKERHUB_USERNAME}",
+        "password": "${DOCKERHUB_TOKEN}"
+      },
+      "storage": {
+        "object": {
+          "type": "minio",
+          "minio": {
+            "address": "192.168.57.1:9011",
+            "mapped_port": 9011,
+            "access_key": "${MINIO_ACCESS_KEY}",
+            "secret_key": "${MINIO_SECRET_KEY}",
+            "instance_id": "${MINIO_INSTANCE_ID}",
+            "input_buckets": [],
+            "output_buckets": [],
+            "type": "minio"
+          }
+        }
+      }
+    }
+  }
+}

@@ -214,6 +214,18 @@ class SeBS(LoggingBase):
             from sebs.openwhisk import OpenWhisk
 
             implementations["openwhisk"] = OpenWhisk
+        if has_platform("openfaas"):
+            from sebs.openfaas import OpenFaaS
+
+            implementations["openfaas"] = OpenFaaS
+        if has_platform("momos"):
+            from sebs.momos import Momos
+
+            implementations["momos"] = Momos
+        if has_platform("knative"):
+            from sebs.knative import Knative
+            
+            implementations["knative"] = Knative
 
         # Validate deployment platform
         if name not in implementations:
@@ -311,6 +323,8 @@ class SeBS(LoggingBase):
             NetworkPingPong,
             InvocationOverhead,
             EvictionModel,
+            Stream,
+            Batch,
         )
 
         # Map of supported experiment types to their implementations
@@ -319,6 +333,8 @@ class SeBS(LoggingBase):
             "network-ping-pong": NetworkPingPong,
             "invocation-overhead": InvocationOverhead,
             "eviction-model": EvictionModel,
+            "stream": Stream,
+            "batch" : Batch,
         }
 
         # Validate experiment type

@@ -431,6 +431,19 @@ class Config(ABC, LoggingBase):
             from sebs.openwhisk.config import OpenWhiskConfig
 
             implementations["openwhisk"] = OpenWhiskConfig.deserialize
+        if has_platform("openfaas"):
+            from sebs.openfaas.config import OpenFaaSConfig
+
+            implementations["openfaas"] = OpenFaaSConfig.deserialize
+        if has_platform("momos"):
+            from sebs.momos.config import MomosConfig
+
+            implementations["momos"] = MomosConfig.deserialize
+        if has_platform("knative"):
+            from sebs.knative.config import KnativeConfig
+
+            implementations["knative"] = KnativeConfig.deserialize
+        
         func = implementations.get(name)
         assert func, "Unknown config type!"
         return func(config[name] if name in config else config, cache, handlers)

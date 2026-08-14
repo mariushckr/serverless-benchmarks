@@ -1,0 +1,64 @@
+{
+  "experiments": {
+    "deployment": "momos",
+    "update_code": false,
+    "update_storage": false,
+    "download_results": false,
+    "architecture": "x64",
+    "system_variant": "container",
+    "runtime": {
+      "language": "python",
+      "version": "3.11"
+    },
+    "type": "perf-cost",
+    "perf-cost": {
+      "benchmark": "010.sleep",
+      "experiments": ["warm"],
+      "input-size": "test",
+      "repetitions": 5,
+      "concurrent-invocations": 1,
+      "memory-sizes": []
+    },
+    "stream": {
+      "duration": 20,
+      "seed": 42,
+      "workloads": [
+        {"benchmark": "010.sleep", "input-size": "test", "rate": 0.5},
+        {"benchmark": "110.dynamic-html", "input-size": "test", "rate": 0.3, "bursty": true, "batch_mean": 2.0}
+      ]
+    },
+    "batch": {
+      "workloads": [
+        {"benchmark": "010.sleep", "input-size": "test", "count": 5},
+        {"benchmark": "110.dynamic-html", "input-size": "test", "count": 5}
+      ]
+    }
+  },
+  "deployment": {
+    "name": "momos",
+    "momos": {
+      "gatewayUrl": "http://192.168.56.11:4000",
+      "momosCli": "momos",
+      "docker_registry": {
+        "registry": "192.168.56.11:5050",
+        "username": "",
+        "password": ""
+      },
+      "storage": {
+        "object": {
+          "type": "minio",
+          "minio": {
+            "address": "192.168.57.1:9011",
+            "mapped_port": 9011,
+            "access_key": "PrapFDeXfnDweLUj-bnOf_ZZC6N23Ufq-UR4bNk0j7Y",
+            "secret_key": "73eb87922fa5d07a4d1ddb1ec561b7c61f8b6ea165d3cb6b5093bdd2b13167fb",
+            "instance_id": "890b992007f23f2ccb008e5cd2399f0713feee8f2ab3ad0b28b8caaad43af516",
+            "input_buckets": [],
+            "output_buckets": [],
+            "type": "minio"
+          }
+        }
+      }
+    }
+  }
+}

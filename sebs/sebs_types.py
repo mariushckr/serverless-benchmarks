@@ -34,6 +34,9 @@ class Platforms(str, Enum):
     - GCP: Google Cloud Platform Cloud Functions
     - LOCAL: Local execution environment
     - OPENWHISK: Apache OpenWhisk
+    - OPENFAAS: OpenFaas
+    - MOMOS: Momos
+    - KNATIVE: Knative
     """
 
     AWS = "aws"
@@ -41,6 +44,9 @@ class Platforms(str, Enum):
     GCP = "gcp"
     LOCAL = "local"
     OPENWHISK = "openwhisk"
+    OPENFAAS = "openfaas"
+    MOMOS = "momos"
+    KNATIVE = "knative"
 
 
 class Storage(str, Enum):

@@ -1,0 +1,4 @@
+redis
+minio
+boto3
+botocore

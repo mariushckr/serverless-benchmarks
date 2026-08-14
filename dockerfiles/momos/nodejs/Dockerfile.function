@@ -1,0 +1,13 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG VERSION
+ENV NODE_VERSION=${VERSION}
+
+ARG MOMOS_IMAGE_NAME
+ENV MOMOS_IMAGE_NAME=$MOMOS_IMAGE_NAME
+
+WORKDIR /function
+COPY . /function
+RUN if [ -f package.json ]; then npm install --production; fi
+
+CMD ["node", "index.js"]

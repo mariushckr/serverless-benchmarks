@@ -7,6 +7,12 @@ perf-cost*
 python-venv
 cache*
 !cache.py
+render-docker-login.sh
+configs/openfaas-benchmark.json
+batch
+stream
+experiments.json
+
 
 minio-volume
 scylladb-volume
