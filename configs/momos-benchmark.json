@@ -48,7 +48,7 @@
         "object": {
           "type": "minio",
           "minio": {
-            "address": "192.168.57.1:9011",
+            "address": "192.168.56.1:9011",
             "mapped_port": 9011,
             "access_key": "PrapFDeXfnDweLUj-bnOf_ZZC6N23Ufq-UR4bNk0j7Y",
             "secret_key": "73eb87922fa5d07a4d1ddb1ec561b7c61f8b6ea165d3cb6b5093bdd2b13167fb",

@@ -12,6 +12,7 @@ configs/openfaas-benchmark.json
 batch
 stream
 experiments.json
+momos-test-setup
 
 
 minio-volume

@@ -102,14 +102,20 @@ class OpenFaaSContainer(DockerContainer):
                 # Copy files (including __main__.py for OpenFaaS)
                 shutil.copy2(file, os.path.join(build_dir, fn))
 
-        # Ensure requirements.txt exists for Docker build
-        # If only version-specific requirements.txt.X exists, copy it to requirements.txt
+        # Ensure requirements.txt has the real dependencies. When a benchmark
+        # ships a version-specific requirements.txt.{version} (which is what
+        # SeBS's own add_deployment_package_python() appends platform
+        # packages like redis to), it must ALWAYS win over a plain
+        # requirements.txt -- a benchmark can ship BOTH, with the generic
+        # one being just a copyright-header stub with zero real
+        # dependencies (confirmed directly: 501.graph-pagerank has this
+        # exact shape). Checking "only if requirements.txt doesn't exist"
+        # misses this case entirely, since the stub genuinely exists.
         if language_name == "python":
             req_file = os.path.join(build_dir, "requirements.txt")
-            if not os.path.exists(req_file):
-                version_req = os.path.join(build_dir, f"requirements.txt.{language_version}")
-                if os.path.exists(version_req):
-                    shutil.copy2(version_req, req_file)
+            version_req = os.path.join(build_dir, f"requirements.txt.{language_version}")
+            if os.path.exists(version_req):
+                shutil.copy2(version_req, req_file)
 
         with open(os.path.join(build_dir, ".dockerignore"), "w") as f:
             f.write("Dockerfile")

@@ -6,6 +6,18 @@ from typing import Dict, List, Optional
 
 from sebs.faas.function import ExecutionResult, Trigger
 
+# Shared across every CLITrigger/HTTPTrigger instance and every invocation.
+# The previous pattern created a brand-new ThreadPoolExecutor per call to
+# async_invoke() and never shut it down -- each one only ever ran a single
+# task, so it lazily spawned exactly one OS thread that was then never
+# cleaned up. Over a sustained stream, this leaks one thread per invocation
+# on the HOST machine running sebs. Confirmed as the direct cause of
+# escalating "Device or resource busy" connection failures under local,
+# single-machine testing -- many leaked threads racing to open new TCP
+# connections to localhost simultaneously. A single shared, bounded pool
+# reuses threads across invocations instead.
+_SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=64)
+
 
 class CLITrigger(Trigger):
     """
@@ -103,9 +115,7 @@ class CLITrigger(Trigger):
         return output.strip()
 
     def async_invoke(self, payload: dict) -> concurrent.futures.Future:
-        pool = concurrent.futures.ThreadPoolExecutor()
-        fut = pool.submit(self.sync_invoke, payload)
-        return fut
+        return _SHARED_EXECUTOR.submit(self.sync_invoke, payload)
 
     def serialize(self) -> dict:
         return {"type": "CLI", "name": self.image_name, "gateway": self.gateway}
@@ -245,9 +255,7 @@ class HTTPTrigger(Trigger):
         return faas_result
 
     def async_invoke(self, payload: dict) -> concurrent.futures.Future:
-        pool = concurrent.futures.ThreadPoolExecutor()
-        fut = pool.submit(self.sync_invoke, payload)
-        return fut
+        return _SHARED_EXECUTOR.submit(self.sync_invoke, payload)
 
     def serialize(self) -> dict:
         return {"type": "HTTP", "name": self.image_name, "url": self.url}

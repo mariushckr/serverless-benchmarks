@@ -20,19 +20,21 @@ class Batch(Experiment):
     Fires a fixed-size batch of invocations essentially simultaneously (all
     submitted in a tight loop via async_invoke(), no inter-arrival delay),
     then waits for every one of them to complete and measures the total
-    wall-clock time to drain the whole batch -- a throughput/"how long to
-    handle everything queued at once" measurement, distinct from PerfCost's
-    "burst" mode, which measures per-invocation cold/warm stats across
-    repeated small forced-cold bursts rather than total drain time for one
-    large batch.
+    wall-clock time to drain the whole batch.
 
     Supports multiple independent concurrent workloads (a "mixed" workload
-    is just a workloads list with more than one entry), same pattern as
-    Stream -- each workload's batch is submitted in its own thread, all
-    starting together, so a mixed-workload batch measures total drain time
-    across all workloads' combined queued invocations at once.
+    is just a workloads list with more than one entry) -- each workload's
+    batch is submitted in its own thread, all starting together, so a
+    mixed-workload batch measures total drain time across all workloads'
+    combined queued invocations at once.
 
     Config (under "batch" in experiments config):
+        label: optional string. If set, results are written to
+               <output_dir>/batch/<label>_results.json instead of the fixed
+               batch/batch_results.json -- without this, running multiple
+               batch scenarios back to back silently overwrites each prior
+               run's results, since the output path is otherwise always
+               identical regardless of config content.
         workloads: list of, each:
             benchmark:   benchmark name, e.g. "110.dynamic-html"
             input-size:  benchmark input size, e.g. "test"/"small"/"large"
@@ -53,6 +55,7 @@ class Batch(Experiment):
     def prepare(self, sebs_client: "SeBS", deployment_client: FaaSSystem):
 
         settings = self.config.experiment_settings(self.name())
+        self._label = settings.get("label")
         self._workload_settings = settings["workloads"]
 
         self._out_dir = os.path.join(sebs_client.output_dir, "batch")
@@ -88,12 +91,6 @@ class Batch(Experiment):
             )
 
     def _submit_one_workload(self, workload: dict, submitted: dict):
-        """Runs in its own thread. Fires workload['count'] invocations back
-        to back with no delay, storing the Futures for the main thread to
-        wait on. Submission itself is near-instant (async_invoke doesn't
-        block), so all workloads' batches start at effectively the same
-        moment regardless of thread scheduling order."""
-
         futures = []
         submit_start = time.time()
         for _ in range(workload["count"]):
@@ -157,13 +154,15 @@ class Batch(Experiment):
             f"in {total_drain_time:.2f}s total"
         )
 
-        out_file = os.path.join(self._out_dir, "batch_results.json")
+        out_filename = f"{self._label}_results.json" if self._label else "batch_results.json"
+        out_file = os.path.join(self._out_dir, out_filename)
         with open(out_file, "w") as out_f:
             out_f.write(
                 serialize(
                     {
                         **json.loads(serialize(result)),
                         "statistics": {
+                            "label": self._label,
                             "total_count": total_count,
                             "total_drain_time_seconds": total_drain_time,
                             "submission_time_seconds": submit_done - batch_start,
@@ -185,6 +184,7 @@ class Batch(Experiment):
                     }
                 )
             )
+        self.logging.info(f"Batch results written to {out_file}")
 
     def process(
         self,
@@ -196,7 +196,10 @@ class Batch(Experiment):
     ):
         import csv
 
-        in_file = os.path.join(directory, "batch", "batch_results.json")
+        settings = self.config.experiment_settings(self.name())
+        label = settings.get("label")
+        in_filename = f"{label}_results.json" if label else "batch_results.json"
+        in_file = os.path.join(directory, "batch", in_filename)
         with open(in_file) as f:
             config = json.load(f)
 
@@ -207,7 +210,8 @@ class Batch(Experiment):
             sebs_client.generate_logging_handlers(logging_filename),
         )
 
-        out_file = os.path.join(directory, "batch", "result.csv")
+        out_csv_filename = f"{label}_result.csv" if label else "result.csv"
+        out_file = os.path.join(directory, "batch", out_csv_filename)
         with open(out_file, "w") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(
@@ -225,6 +229,7 @@ class Batch(Experiment):
                         ]
                     )
 
-        summary_file = os.path.join(directory, "batch", "summary.json")
+        out_summary_filename = f"{label}_summary.json" if label else "summary.json"
+        summary_file = os.path.join(directory, "batch", out_summary_filename)
         with open(summary_file, "w") as f:
             json.dump(statistics, f, indent=2)

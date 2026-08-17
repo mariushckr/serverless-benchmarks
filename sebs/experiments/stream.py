@@ -27,19 +27,20 @@ class Stream(Experiment):
     workload is just a workloads list with more than one entry) -- each
     workload gets its own thread and its own seeded RNG, so results are
     fully reproducible regardless of thread-scheduling nondeterminism in
-    wall-clock timing. The sum of independent Poisson processes is itself
-    Poisson, so this also gives a mathematically clean aggregate load while
-    keeping each workload's own results cleanly separable.
+    wall-clock timing.
 
-    Optionally bursty via compound Poisson batch arrivals: instead of one
-    invocation per arrival, each arrival fires a batch of
-    Poisson-distributed size (mean = batch_mean). Set "bursty": true and
-    "batch_mean": <float> on a workload to enable this; omit or set
-    bursty=false for a plain single-invocation-per-arrival stream.
+    Optionally bursty via compound Poisson batch arrivals: each arrival
+    fires a batch of Poisson-distributed size (mean = batch_mean).
 
     Config (under "stream" in experiments config):
         duration: how long to generate arrivals for, in seconds
         seed:     optional int, base seed for reproducibility
+        label:    optional string. If set, results are written to
+                  <output_dir>/stream/<label>_results.json instead of the
+                  fixed stream/stream_results.json -- without this, running
+                  multiple stream scenarios back to back silently overwrites
+                  each prior run's results, since the output path is
+                  otherwise always identical regardless of config content.
         workloads: list of, each:
             benchmark:   benchmark name, e.g. "110.dynamic-html"
             input-size:  benchmark input size, e.g. "test"/"small"/"large"
@@ -65,6 +66,7 @@ class Stream(Experiment):
         settings = self.config.experiment_settings(self.name())
         self._duration = settings["duration"]
         self._base_seed = settings.get("seed")
+        self._label = settings.get("label")
         self._workload_settings = settings["workloads"]
 
         self._out_dir = os.path.join(sebs_client.output_dir, "stream")
@@ -74,8 +76,6 @@ class Stream(Experiment):
         self._deployment_client = deployment_client
         self._sebs_client = sebs_client
 
-        # Set up one benchmark + trigger per workload up front, so the
-        # actual timed run() doesn't pay any setup cost mid-stream.
         self._workloads = []
         for idx, w in enumerate(self._workload_settings):
             benchmark = sebs_client.get_benchmark(w["benchmark"], deployment_client, self.config)
@@ -105,9 +105,6 @@ class Stream(Experiment):
             )
 
     def _run_one_workload(self, workload: dict, results: dict):
-        """Runs in its own thread. Appends (function, ExecutionResult, arrival_time)
-        tuples to results[workload_name] as invocations complete."""
-
         rng = random.Random(workload["seed"])
         futures = []
         arrival_times: List[float] = []
@@ -126,9 +123,6 @@ class Stream(Experiment):
             fire_time = time.time()
             batch_size = 1
             if workload["bursty"]:
-                # Poisson-distributed batch size (mean = batch_mean),
-                # minimum 1 so every arrival event fires at least one
-                # invocation.
                 batch_size = max(1, rng_poisson(rng, workload["batch_mean"]))
 
             for _ in range(batch_size):
@@ -187,13 +181,15 @@ class Stream(Experiment):
                 result.add_invocation(func, ret)
         result.end()
 
-        out_file = os.path.join(self._out_dir, "stream_results.json")
+        out_filename = f"{self._label}_results.json" if self._label else "stream_results.json"
+        out_file = os.path.join(self._out_dir, out_filename)
         with open(out_file, "w") as out_f:
             out_f.write(
                 serialize(
                     {
                         **json.loads(serialize(result)),
                         "statistics": {
+                            "label": self._label,
                             "duration": self._duration,
                             "wall_clock_seconds": end_wall - start_wall,
                             "workloads": {
@@ -208,6 +204,7 @@ class Stream(Experiment):
                     }
                 )
             )
+        self.logging.info(f"Stream results written to {out_file}")
 
     def process(
         self,
@@ -219,7 +216,10 @@ class Stream(Experiment):
     ):
         import csv
 
-        in_file = os.path.join(directory, "stream", "stream_results.json")
+        settings = self.config.experiment_settings(self.name())
+        label = settings.get("label")
+        in_filename = f"{label}_results.json" if label else "stream_results.json"
+        in_file = os.path.join(directory, "stream", in_filename)
         with open(in_file) as f:
             config = json.load(f)
 
@@ -229,7 +229,8 @@ class Stream(Experiment):
             sebs_client.generate_logging_handlers(logging_filename),
         )
 
-        out_file = os.path.join(directory, "stream", "result.csv")
+        out_filename = f"{label}_result.csv" if label else "result.csv"
+        out_file = os.path.join(directory, "stream", out_filename)
         with open(out_file, "w") as csvfile:
             writer = csv.writer(csvfile, delimiter=",")
             writer.writerow(

@@ -140,7 +140,7 @@ def main():
     while True:
         try:
             # BLPOP blocks until a message arrives (timeout=0 = forever)
-            item = r.blpop(QUEUE_NAME, timeout=0)
+            item = r.blpop([f"{QUEUE_NAME}:control", QUEUE_NAME], timeout=0)
             if item is None:
                 continue
             _, raw = item   # blpop returns (key, value)

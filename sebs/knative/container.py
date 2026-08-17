@@ -88,14 +88,21 @@ class KnativeContainer(DockerContainer):
             else:
                 shutil.copy2(file, os.path.join(build_dir, fn))
 
-        # Ensure requirements.txt exists for Docker build even if only a
-        # version-specific requirements.txt.X was produced.
+        # Ensure requirements.txt has the real dependencies. When a benchmark
+        # ships a version-specific requirements.txt.{version} (which is what
+        # SeBS's own add_deployment_package_python() appends platform
+        # packages like redis to), it must ALWAYS win over a plain
+        # requirements.txt -- a benchmark can ship BOTH, with the generic
+        # one being just a copyright-header stub with zero real
+        # dependencies (confirmed directly on Momos: 501.graph-pagerank has
+        # this exact shape). The previous "only if requirements.txt doesn't
+        # exist" guard misses this case entirely, since the stub genuinely
+        # exists -- untested here until now, but would fail identically.
         if language_name == "python":
             req_file = os.path.join(build_dir, "requirements.txt")
-            if not os.path.exists(req_file):
-                version_req = os.path.join(build_dir, f"requirements.txt.{language_version}")
-                if os.path.exists(version_req):
-                    shutil.copy2(version_req, req_file)
+            version_req = os.path.join(build_dir, f"requirements.txt.{language_version}")
+            if os.path.exists(version_req):
+                shutil.copy2(version_req, req_file)
 
         with open(os.path.join(build_dir, ".dockerignore"), "w") as f:
             f.write("Dockerfile")

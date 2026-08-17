@@ -132,8 +132,10 @@ async function main() {
 
   while (true) {
     try {
-      // BLPOP blocks until a message arrives; returns { key, element }
-      const item = await subscriber.blPop(QUEUE_NAME, 0);
+      // BLPOP blocks until a message arrives on either key; returns { key, element }.
+      // Control key listed first so a shutdown signal never gets stuck
+      // behind a continuously refilling work queue.
+      const item = await subscriber.blPop([`${QUEUE_NAME}:control`, QUEUE_NAME], 0);
       if (!item) continue;
 
       if (isShutdownSignal(item.element)) {
