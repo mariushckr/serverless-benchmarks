@@ -86,6 +86,7 @@ def handle_invocation(r: redis.Redis, raw: str):
     logging.info(f"ARGS KEYS: {list(args.keys())}")
 
     try:
+        sys.path.insert(0, "/")
         from function import handler
         ret = handler(args)
         end = datetime.datetime.now()
