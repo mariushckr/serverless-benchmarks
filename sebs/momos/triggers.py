@@ -7,16 +7,16 @@ from typing import Dict, List, Optional
 from sebs.faas.function import ExecutionResult, Trigger
 
 # Shared across every CLITrigger/HTTPTrigger instance and every invocation.
-# The previous pattern created a brand-new ThreadPoolExecutor per call to
-# async_invoke() and never shut it down -- each one only ever ran a single
-# task, so it lazily spawned exactly one OS thread that was then never
-# cleaned up. Over a sustained stream, this leaks one thread per invocation
-# on the HOST machine running sebs. Confirmed as the direct cause of
-# escalating "Device or resource busy" connection failures under local,
-# single-machine testing -- many leaked threads racing to open new TCP
-# connections to localhost simultaneously. A single shared, bounded pool
-# reuses threads across invocations instead.
-_SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=64)
+# max_workers raised from the original 64 -- confirmed via direct mpstat
+# measurement that server-side cluster capacity (not this pool) was the
+# actual bottleneck causing multi-hour backlog drains; this pool itself
+# was never CPU-constrained on the host (each worker is mostly idle,
+# blocked on I/O during its SSE wait). Raising this doesn't reduce total
+# processing time -- that's still bounded by server-side capacity -- but
+# it does mean less of the real backlog sits invisible in this pool's own
+# internal queue and more of it genuinely reaches the system under test,
+# which is a more honest reflection of actual queued demand.
+_SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=256)
 
 
 class CLITrigger(Trigger):
@@ -164,17 +164,24 @@ class HTTPTrigger(Trigger):
     def trigger_type() -> Trigger.TriggerType:
         return Trigger.TriggerType.HTTP
 
-    def sync_invoke(self, payload: dict) -> ExecutionResult:
+    def dispatch(self, payload: dict):
+        """
+        Just the POST to /stream/invoke -- fast (milliseconds), meant to be
+        called DIRECTLY in the scheduler's loop, never via async_invoke().
+        This is the real "arrival" event at MOMOS; nothing about worker-pool
+        backlog can delay it, since it never touches the shared executor.
+
+        Returns (request_id, begin_timestamp) on success, or (None,
+        begin_timestamp) with a failure already logged if the POST itself
+        fails -- callers should check for None before calling
+        wait_for_result().
+        """
         import requests
 
         self.logging.debug(f"Invoke function {self.image_name} via {self.url}")
-
         full_payload = {**payload, **self.storage_env}
         begin = datetime.datetime.now()
 
-        # Step 1: POST /stream/invoke -- accepted immediately with a requestId,
-        # NOT the actual result. This is the exact mismatch that was silently
-        # producing wrong data before this fix.
         try:
             resp = requests.post(
                 self.url,
@@ -183,16 +190,28 @@ class HTTPTrigger(Trigger):
             )
             resp.raise_for_status()
             request_id = resp.json()["requestId"]
+            return request_id, begin
         except Exception as e:
-            end = datetime.datetime.now()
             self.logging.error(f"Failed to submit invocation for {self.image_name}: {e}")
+            return None, begin
+
+    def wait_for_result(self, request_id: Optional[str], begin: datetime.datetime) -> ExecutionResult:
+        """
+        The slow part -- opens the SSE stream and waits for the "result"
+        event, up to 600s. Meant to run inside the worker pool via
+        async_invoke_result(), where backlog is fine since real arrival at
+        MOMOS has already genuinely happened in dispatch() before this was
+        ever called.
+        """
+        import requests
+
+        if request_id is None:
+            # dispatch() itself already failed -- nothing to wait for.
+            end = datetime.datetime.now()
             faas_result = ExecutionResult.from_times(begin, end)
             faas_result.stats.failure = True
             return faas_result
 
-        # Step 2: open the SSE stream and wait specifically for the "result"
-        # named event (the gateway also closes the connection right after
-        # sending it, or after its own 10-minute timeout with no result).
         result_data = None
         sse_url = f"{self.gateway_base}/invocations/{request_id}"
         try:
@@ -234,11 +253,6 @@ class HTTPTrigger(Trigger):
             faas_result.stats.failure = True
             return faas_result
 
-        # NOTE: the gateway sends sseClient.sendEvent("result", result.toString()).
-        # If `result` on the Java side is a Map (not a pre-serialized JSON
-        # string), .toString() produces "{key=value}", not valid JSON, and
-        # this parse will fail. This needs empirical verification against
-        # the real gateway -- flagging clearly rather than assuming.
         try:
             parsed = json.loads(result_data)
         except json.JSONDecodeError:
@@ -253,6 +267,18 @@ class HTTPTrigger(Trigger):
         faas_result.parse_benchmark_output(inner)
         faas_result.request_id = inner.get("request_id", request_id)
         return faas_result
+
+    def sync_invoke(self, payload: dict) -> ExecutionResult:
+        """Combined dispatch + wait, kept for anything still calling this
+        directly (e.g. a single non-streamed invoke)."""
+        request_id, begin = self.dispatch(payload)
+        return self.wait_for_result(request_id, begin)
+
+    def async_invoke_result(self, request_id: Optional[str], begin: datetime.datetime) -> concurrent.futures.Future:
+        """Hands the SLOW part off to the shared pool -- safe to backlog,
+        since dispatch() already happened synchronously before this is
+        ever called."""
+        return _SHARED_EXECUTOR.submit(self.wait_for_result, request_id, begin)
 
     def async_invoke(self, payload: dict) -> concurrent.futures.Future:
         return _SHARED_EXECUTOR.submit(self.sync_invoke, payload)

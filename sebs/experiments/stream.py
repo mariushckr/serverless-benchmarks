@@ -106,6 +106,18 @@ class Stream(Experiment):
 
     def _run_one_workload(self, workload: dict, results: dict):
         rng = random.Random(workload["seed"])
+        trigger = workload["trigger"]
+        # HTTPTrigger supports the dispatch/wait split -- dispatching
+        # inline here (not via the worker pool) guarantees the invocation
+        # genuinely reaches MOMOS within `duration`, regardless of how
+        # backed up the wait-for-result side gets. Without this, arrival
+        # itself could be delayed by hours if the worker pool falls behind
+        # -- confirmed directly: a 1800s-duration scenario took ~14000s
+        # wall-clock, and the client's own scheduling loop had no way to
+        # know or report that most of that gap was arrivals still waiting
+        # to be dispatched, not MOMOS being slow to respond.
+        supports_split = hasattr(trigger, "dispatch") and hasattr(trigger, "async_invoke_result")
+
         futures = []
         arrival_times: List[float] = []
         start = time.time()
@@ -126,7 +138,15 @@ class Stream(Experiment):
                 batch_size = max(1, rng_poisson(rng, workload["batch_mean"]))
 
             for _ in range(batch_size):
-                fut = workload["trigger"].async_invoke(workload["input"])
+                if supports_split:
+                    # Dispatch happens HERE, synchronously, in the
+                    # scheduling loop itself -- this is the real arrival
+                    # event at MOMOS. Only the (potentially slow) wait for
+                    # the result gets handed to the pool.
+                    request_id, begin = trigger.dispatch(workload["input"])
+                    fut = trigger.async_invoke_result(request_id, begin)
+                else:
+                    fut = trigger.async_invoke(workload["input"])
                 futures.append(fut)
                 arrival_times.append(fire_time - start)
 
@@ -139,10 +159,29 @@ class Stream(Experiment):
         for fut, arrival_t in zip(futures, arrival_times):
             try:
                 ret = fut.result()
-                collected.append((workload["function"], ret, arrival_t))
             except Exception as e:
                 error_count += 1
                 errors.append(str(e))
+                continue
+
+            # HTTPTrigger.sync_invoke() never raises on an SSE timeout or a
+            # failed POST -- it catches the error internally and returns a
+            # normal-looking ExecutionResult with .stats.failure=True set
+            # as a flag instead. The exception-only check above silently
+            # missed every one of these: confirmed directly against real
+            # results (215 invocations with times.client ~600s, matching
+            # the SSE trigger's own timeout=600, ALL with stats.failure
+            # True, yet failures_count reported 0). This check is what
+            # was missing.
+            #
+            # Still added to `collected` regardless of failure -- the full
+            # record (timing, request_id) is what let us diagnose this bug
+            # in the first place; only the COUNT was ever wrong, not the
+            # underlying data.
+            if ret.stats.failure:
+                error_count += 1
+                errors.append(f"Invocation failed (request_id={getattr(ret, 'request_id', '?')})")
+            collected.append((workload["function"], ret, arrival_t))
 
         results[workload["name"]] = {
             "invocations": collected,

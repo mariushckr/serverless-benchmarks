@@ -91,10 +91,20 @@ class Batch(Experiment):
             )
 
     def _submit_one_workload(self, workload: dict, submitted: dict):
+        trigger = workload["trigger"]
+        supports_split = hasattr(trigger, "dispatch") and hasattr(trigger, "async_invoke_result")
+
         futures = []
         submit_start = time.time()
         for _ in range(workload["count"]):
-            fut = workload["trigger"].async_invoke(workload["input"])
+            if supports_split:
+                # Dispatch happens HERE, synchronously -- submit_end below
+                # then genuinely reflects when every invocation actually
+                # reached MOMOS, not just when Future objects were created.
+                request_id, begin = trigger.dispatch(workload["input"])
+                fut = trigger.async_invoke_result(request_id, begin)
+            else:
+                fut = trigger.async_invoke(workload["input"])
             futures.append(fut)
         submitted[workload["name"]] = {
             "futures": futures,
@@ -139,11 +149,22 @@ class Batch(Experiment):
             for fut in data["futures"]:
                 try:
                     ret = fut.result()
-                    completion_times[name].append(time.time() - batch_start)
-                    result.add_invocation(data["function"], ret)
                 except Exception as e:
                     error_count += 1
                     errors.append(str(e))
+                    continue
+
+                # Same fix as stream.py: sync_invoke() never raises on an
+                # SSE timeout or failed POST, it sets .stats.failure=True
+                # on a normally-returned result instead. The exception-only
+                # check above missed every one of these.
+                completion_times[name].append(time.time() - batch_start)
+                result.add_invocation(data["function"], ret)
+                if ret.stats.failure:
+                    error_count += 1
+                    errors.append(
+                        f"Invocation failed (request_id={getattr(ret, 'request_id', '?')})"
+                    )
 
         drain_end = time.time()
         result.end()
